@@ -33,10 +33,10 @@ from pepflow.modules.protein.writers import save_pdb
 # bind_dic = torch.load("/datapool/data2/home/jiahan/ResProj/PepDiff/frame-flow/misc/affinity_dict.pt")
 
 # testset
-names = []
-with open('/datapool/data2/home/ruihan/data/jiahan/ResProj/PepDiff/pepflowww/Data/names.txt','r') as f:
-    for line in f:
-        names.append(line.strip())
+# names = []
+# with open('/datapool/data2/home/ruihan/data/jiahan/ResProj/PepDiff/pepflowww/Data/names.txt','r') as f:
+#     for line in f:
+#         names.append(line.strip())
     
 def preprocess_structure(task):
 
@@ -143,10 +143,10 @@ class PepDataset(Dataset):
                 todo_pdbs = all_pdbs
             else:
                 todo_pdbs = []
-                # self._connect_db()
-                # processed_pdbs = self.db_ids
-                # self._close_db()
-                # todo_pdbs = list(set(all_pdbs) - set(processed_pdbs))
+                self._connect_db()
+                processed_pdbs = self.db_ids
+                self._close_db()
+                todo_pdbs = list(set(all_pdbs) - set(processed_pdbs))
 
         if len(todo_pdbs) > 0:
             self._preprocess_structures(todo_pdbs)
@@ -199,8 +199,8 @@ class PepDataset(Dataset):
 
 if __name__ == '__main__':
     device = 'cuda:1'
-    config,cfg_name = load_config("./configs/learn/learn_all.yaml")
-    dataset = PepDataset(structure_dir = "./Data/PepMerge_new/", dataset_dir = "/Data/Fixed Data",
+    # config,cfg_name = load_config("./configs/learn/learn_all.yaml")
+    dataset = PepDataset(structure_dir = "./Datas/PepMerge_release/", dataset_dir = "/Datas/Fixed Data",
                                             name = 'pep_pocket_test', transform=None, reset=True)
     print(len(dataset))
     print(dataset[0])

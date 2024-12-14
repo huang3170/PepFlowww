@@ -92,7 +92,7 @@ def _make_psi_chi_rotation_matrices(angles: torch.Tensor) -> torch.Tensor:
     return R
 
 
-def _get_rigid_group(aa: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def _get_rigid_group(aa: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Extract rigid group constants.
 
     Args:
@@ -142,7 +142,7 @@ def full_atom_reconstruction(
     t_bb: torch.Tensor,
     angles: torch.Tensor,
     aa: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute full atom positions from backbone frames and torsional angles.
 
     See alphafold supplementary Algorithm 24 for details.

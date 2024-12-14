@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 import torch.nn.functional as F
 
@@ -19,7 +20,7 @@ def align(
     pos_1: torch.Tensor,
     pos_2: torch.Tensor,
     pos_mask: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """(L,A,3),(L,A) align pos14_model to pos14_native, return aligned pos"""
     L, A, _ = pos_1.shape
     x = torch.masked_select(pos_1, pos_mask.bool().unsqueeze(-1)).reshape(-1, 3)
@@ -39,7 +40,7 @@ def batch_align(
     pos_1:  torch.Tensor,
     pos_2: torch.Tensor,
     pos_mask: torch.Tensor,      
-)-> tuple[torch.Tensor, torch.Tensor]:
+)-> Tuple[torch.Tensor, torch.Tensor]:
     """(B,L,A,3),(B,L,A) Batch align pos_1 to pos_2, return aligned pos_1 and pos_2"""
     x = torch.masked_select(pos_1, pos_mask.unsqueeze(-1)).reshape(pos_1.size(0), -1, 3)
     y = torch.masked_select(pos_2, pos_mask.unsqueeze(-1)).reshape(pos_2.size(0), -1, 3)
