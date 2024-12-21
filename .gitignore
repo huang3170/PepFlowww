@@ -17,7 +17,7 @@ outputs/
 .hydra
 preprocessed/
 misc/
-Datas/
+data_input/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -62,8 +62,10 @@ class FlowModel(nn.Module):
         self._model_cfg = cfg.encoder
         self._interpolant_cfg = cfg.interpolant
 
-        self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size,max_num_heavyatoms)
-        self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size,max_num_heavyatoms)
+        self.node_embedder = NodeEmbedder(feat_dim=cfg.encoder.node_embed_size,
+                                          max_num_atoms=max_num_heavyatoms)
+        self.edge_embedder = EdgeEmbedder(feat_dim=cfg.encoder.edge_embed_size,
+                                          max_num_atoms=max_num_heavyatoms)
         self.ga_encoder = GAEncoder(cfg.encoder.ipa)
 
         self.sample_structure = self._interpolant_cfg.sample_structure
@@ -73,15 +75,15 @@ class FlowModel(nn.Module):
         self.k = self._interpolant_cfg.seqs.simplex_value
     
     def encode(self, batch):
-        rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N] )
+        rotmats_1 =  construct_3d_basis(center=batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],
+                                        p1=batch['pos_heavyatom'][:, :, BBHeavyAtom.C],
+                                        p2=batch['pos_heavyatom'][:, :, BBHeavyAtom.N] )
         trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
         seqs_1 = batch['aa']
 
-        # ignore psi
-        # batch['torsion_angle'] = batch['torsion_angle'][:,:,1:]
-        # batch['torsion_angle_mask'] = batch['torsion_angle_mask'][:,:,1:]
         angles_1 = batch['torsion_angle']
 
+        #only take the CA atom positon for the receptor as true. mark which residue is from peptide
         context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         structure_mask = context_mask if self.sample_structure else None
         sequence_mask = context_mask if self.sample_sequence else None
@@ -113,11 +115,15 @@ class FlowModel(nn.Module):
         num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask,angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
 
-        #encode
+        # encode
+        
+        # rotmats_1 is the rotation matrix for the x,y,z unit axis [B,L,3,3] 不同residue的x,y,z方向
+        # trans_1 only the CA atom positions
+        # seqs_1 is the aa sequence
+        # angle_1 is the torsion_angle
         rotmats_1, trans_1, angles_1, seqs_1, node_embed, edge_embed = self.encode(batch) # no generate mask
 
         # prepare for denoise
-        trans_1_c,_ = self.zero_center_part(trans_1,gen_mask,res_mask)
         trans_1_c = trans_1 # already centered when constructing dataset
         seqs_1_simplex = self.seq_to_simplex(seqs_1)
         seqs_1_prob = F.softmax(seqs_1_simplex,dim=-1)
@@ -127,6 +133,7 @@ class FlowModel(nn.Module):
             t = t*(1-2 * self._interpolant_cfg.min_t) + self._interpolant_cfg.min_t # avoid 0
             if self.sample_structure:
                 # corrupt trans
+                # initialize random position
                 trans_0 = torch.randn((num_batch,num_res,3), device=batch['aa'].device) * self._interpolant_cfg.trans.sigma # scale with sigma?
                 trans_0_c,_ = self.zero_center_part(trans_0,gen_mask,res_mask)
                 trans_t = (1-t[...,None])*trans_0_c + t[...,None]*trans_1_c
@@ -158,7 +165,8 @@ class FlowModel(nn.Module):
                 seqs_t_prob = seqs_1_prob.detach().clone()
 
         # denoise
-        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(t, rotmats_t, trans_t_c, angles_t, seqs_t, node_embed, edge_embed, gen_mask, res_mask)
+        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(t, rotmats_t, trans_t_c, angles_t, seqs_t, 
+                                                                                         node_embed, edge_embed, gen_mask, res_mask)
         pred_seqs_1 = sample_from(F.softmax(pred_seqs_1_prob,dim=-1))
         pred_seqs_1 = torch.where(batch['generate_mask'],pred_seqs_1,torch.clamp(seqs_1,0,19))
         pred_trans_1_c,_ = self.zero_center_part(pred_trans_1,gen_mask,res_mask)
@@ -176,12 +184,10 @@ class FlowModel(nn.Module):
         rot_loss = torch.sum(((gt_rot_vf - pred_rot_vf) * norm_scale)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         rot_loss = torch.mean(rot_loss)
 
-        # bb aux loss
+        # backbone aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_1_c, rotmats_1)[:, :, :3] 
         pred_bb_atoms = all_atom.to_atom37(pred_trans_1_c, pred_rotmats_1)[:, :, :3]
-        # gt_bb_atoms = all_atom.to_bb_atoms(trans_1_c, rotmats_1, angles_1[:,:,0]) # N,CA,C,O,CB
-        # pred_bb_atoms = all_atom.to_bb_atoms(pred_trans_1_c, pred_rotmats_1, pred_angles_1[:,:,0])
-        # print(gt_bb_atoms.shape)
+        
         bb_atom_loss = torch.sum(
             (gt_bb_atoms - pred_bb_atoms) ** 2 * gen_mask[..., None, None],
             dim=(-1, -2, -3)
@@ -190,7 +196,8 @@ class FlowModel(nn.Module):
         # bb_atom_loss = torch.mean(torch.where(t[:,0]>=0.75,bb_atom_loss,torch.zeros_like(bb_atom_loss))) # penalty for near gt point
 
         # seqs vf loss
-        seqs_loss = F.cross_entropy(pred_seqs_1_prob.view(-1,pred_seqs_1_prob.shape[-1]),torch.clamp(seqs_1,0,19).view(-1), reduction='none').view(pred_seqs_1_prob.shape[:-1]) # (N,L), not softmax
+        seqs_loss = F.cross_entropy(pred_seqs_1_prob.view(-1,pred_seqs_1_prob.shape[-1]),
+                                    torch.clamp(seqs_1,0,19).view(-1), reduction='none').view(pred_seqs_1_prob.shape[:-1]) # (N,L), not softmax
         seqs_loss = torch.sum(seqs_loss * gen_mask, dim=-1) / (torch.sum(gen_mask,dim=-1) + 1e-8)
         seqs_loss = torch.mean(seqs_loss)
 
@@ -374,99 +381,3 @@ class FlowModel(nn.Module):
         return clean_traj
 
 
-# if __name__ == '__main__':
-#     prefix_dir = './pepflowww'
-#     # config,cfg_name = load_config("../configs/angle/learn_sc.yaml")
-#     config,cfg_name = load_config(os.path.join(prefix_dir,"configs/angle/learn_sc.yaml"))
-#     # print(config)
-#     device = 'cuda:0'
-#     dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
-#                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-#     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=PaddingCollate(eight=False), num_workers=4, pin_memory=True)
-#     ckpt = torch.load("./checkpoints/600000.pt", map_location=device)
-#     seed_all(114514)
-#     model = FlowModel(config.model).to(device)
-#     model.load_state_dict(process_dic(ckpt['model']))
-#     model.eval()
-    
-#     # print(model)
-
-#     # print(dataset[0]['chain_id'])
-#     # print(dataset[0]['id']) 
-#     # print(dataset[0]['resseq'])
-#     # print(dataset[0]['res_nb'])
-#     # print(dataset[0]['icode'])
-
-#     dic = {'id':[],'len':[],'tran':[],'aar':[],'rot':[],'trans_loss':[],'rot_loss':[]}
-
-#     # for batch in tqdm(dataloader):
-#     #     batch = recursive_to(batch,device)
-#     for i in tqdm(range(len(dataset))):
-#         item = dataset[i]
-#         data_list = [deepcopy(item) for _ in range(16)]
-#         batch = recursive_to(collate_fn(data_list),device)
-#         loss_dic = model(batch)
-#         # traj_1 = model.sample(batch,num_steps=50,sample_bb=False,sample_ang=True,sample_seq=False)
-#         traj_1 = model.sample(batch,num_steps=50,sample_bb=True,sample_ang=True,sample_seq=True)
-#         ca_dist = torch.sqrt(torch.sum((traj_1[-1]['trans']-traj_1[-1]['trans_1'])**2*batch['generate_mask'][...,None].cpu().long()) / (torch.sum(batch['generate_mask']) + 1e-8).cpu()) # rmsd
-#         rot_dist = torch.sqrt(torch.sum((traj_1[-1]['rotmats']-traj_1[-1]['rotmats_1'])**2*batch['generate_mask'][...,None,None].long().cpu()) / (torch.sum(batch['generate_mask']) + 1e-8).cpu()) # rmsd
-#         aar = torch.sum((traj_1[-1]['seqs']==traj_1[-1]['seqs_1']) * batch['generate_mask'].long().cpu()) / (torch.sum(batch['generate_mask']).cpu() + 1e-8)
-        
-
-#         print(loss_dic)
-#         print(f'tran:{ca_dist},rot:{rot_dist},aar:{aar},len:{batch["generate_mask"].sum().item()}')
-
-#         # free
-#         torch.cuda.empty_cache()
-#         gc.collect()
-        
-#     #     dic['tran'].append(ca_dist.item())
-#     #     dic['rot'].append(rot_dist.item())
-#         dic['aar'].append(aar.item())
-#         dic['trans_loss'].append(loss_dic['trans_loss'].item())
-#         dic['rot_loss'].append(loss_dic['rot_loss'].item())
-#         dic['id'].append(batch['id'][0])
-#         dic['len'].append(batch['generate_mask'].sum().item())
-#     #     # break
-
-#     #     traj_1[-1]['batch'] = batch
-#     #     torch.save(traj_1[-1],f'/datapool/data2/home/jiahan/ResProj/PepDiff/frame-flow/Data/Models_new/Pack_new/outputs/{batch["id"][0]}.pt')
-
-#         # print(dic)
-#     # dic = pd.DataFrame(dic)
-#     # dic.to_csv(f'/datapool/data2/home/jiahan/ResProj/PepDiff/frame-flow/Data/Models_new/Pack/outputs.csv',index=None)
-
-#     print(np.mean(dic['aar']))
-#     print(np.mean(dic['trans_loss']))
-
-# if __name__ == '__main__':
-#     config,cfg_name = load_config("./configs/angle/learn_angle.yaml")
-#     seed_all(114514)
-#     device = 'cpu'
-#     dataset = PepDataset(structure_dir = config.dataset.train.structure_dir, dataset_dir = config.dataset.train.dataset_dir,
-#                                             name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
-#     dataloader = DataLoader(dataset, batch_size=2, shuffle=False, collate_fn=PaddingCollate(), num_workers=4, pin_memory=True)
-#     model = FlowModel(config.model).to(device)
-#     optimizer = torch.optim.Adam(model.parameters(),lr=1.e-4)
-
-#     # ckpt = torch.load('./checkpoints/90000.pt',map_location=device)
-#     # model.load_state_dict(process_dic(ckpt['model']))
-#     # optimizer.load_state_dict(ckpt['optimizer'])
-    
-    
-#     # torch.autograd.set_detect_anomaly(True)
-#     for i,batch in tqdm(enumerate(dataloader)):
-#         batch = recursive_to(batch,device)
-#         loss_dict = model(batch)
-#         loss = sum_weighted_losses(loss_dict, config.train.loss_weights)
-#         # if torch.isnan(loss):
-#         #     print(i)
-#         #     print(batch['id'])
-
-#         loss.backward()
-#         orig_grad_norm = clip_grad_norm_(model.parameters(), config.train.max_grad_norm)
-
-#         print(f'{loss_dict},{loss},{orig_grad_norm}')
-
-#         optimizer.step()
-#         optimizer.zero_grad()

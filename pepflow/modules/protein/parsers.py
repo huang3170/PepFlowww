@@ -178,16 +178,3 @@ def get_fasta_from_pdb(pdb_file):
 
     return seq_dic
 
-# def get_fasta_from_pdb(pdb_file):
-#     parser = PDBParser()
-#     structure = parser.get_structure("pdb", pdb_file)
-    
-#     fasta_sequence = ""
-#     for chain in structure.get_chains():
-#         for residue in chain.get_residues():
-#             if residue.get_resname() in seq1(''):
-#                 fasta_sequence += seq1(residue.get_resname())
-    
-#     return fasta_sequence
-
-

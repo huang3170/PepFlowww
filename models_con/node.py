@@ -24,13 +24,6 @@ class NodeEmbedder(nn.Module):
             nn.Linear(feat_dim, feat_dim)
         )
     
-    # def embed_t(self, timesteps, mask):
-    #     timestep_emb = get_time_embedding(
-    #         timesteps[:, 0],
-    #         self.feat_dim,
-    #         max_positions=2056
-    #     )[:, None, :].repeat(1, mask.shape[1], 1)
-    #     return timestep_emb
 
     def forward(self, aa, res_nb, chain_nb, pos_atoms, mask_atoms, structure_mask=None, sequence_mask=None):
         """
@@ -56,7 +49,7 @@ class NodeEmbedder(nn.Module):
             aa = torch.where(sequence_mask, aa, torch.full_like(aa, fill_value=AA.UNK))
         aa_feat = self.aatype_embed(aa) # (N, L, feat)
 
-        # Coordinate features
+        # Coordinate features\\\\\\\\\\\
         R = construct_3d_basis(
             pos_atoms[:, :, BBHeavyAtom.CA], 
             pos_atoms[:, :, BBHeavyAtom.C], 

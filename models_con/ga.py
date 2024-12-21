@@ -91,7 +91,10 @@ class GAEncoder(nn.Module):
         node_mask = res_mask
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
 
-        node_embed = self.res_feat_mixer(torch.cat([node_embed, self.current_seq_embedder(seqs_t), self.embed_t(t,node_mask), self.angles_embedder(angles_t).reshape(num_batch,num_res,-1)],dim=-1))
+        node_embed = self.res_feat_mixer(torch.cat([node_embed, 
+                                                    self.current_seq_embedder(seqs_t), 
+                                                    self.embed_t(t,node_mask), 
+                                                    self.angles_embedder(angles_t).reshape(num_batch,num_res,-1)],dim=-1))
         node_embed = node_embed * node_mask[..., None]
         curr_rigids = du.create_rigid(rotmats_t, trans_t)
         for b in range(self._ipa_conf.num_blocks):

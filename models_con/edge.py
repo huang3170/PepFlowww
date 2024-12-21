@@ -96,13 +96,6 @@ class EdgeEmbedder(nn.Module):
             # Avoid data leakage at training time
             feat_dihed = feat_dihed * pair_structure_mask[:, :, :, None]
 
-        # # trans embed
-        # dist_feats = calc_distogram(
-        #     trans, min_bin=1e-3, max_bin=20.0, num_bins=self.num_bins)
-        # if sc_trans == None:
-        #     sc_trans = torch.zeros_like(trans)
-        # sc_feats = calc_distogram(
-        #     sc_trans, min_bin=1e-3, max_bin=20.0, num_bins=self.num_bins)
 
         # All
         feat_all = torch.cat([feat_aapair, feat_relpos, feat_dist, feat_dihed], dim=-1)

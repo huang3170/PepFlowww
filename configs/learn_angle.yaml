@@ -1,10 +1,10 @@
 model:
   encoder:
-    node_embed_size: 128
-    edge_embed_size: 64
+    node_embed_size: 64
+    edge_embed_size: 32
     ipa:
-      c_s: 128 #${model.node_embed_size}
-      c_z: 64 #${model.edge_embed_size}
+      c_s: 64 #${model.node_embed_size}
+      c_z: 32 #${model.edge_embed_size}
       c_hidden: 128
       no_heads: 8
       no_qk_points: 8
@@ -62,13 +62,13 @@ train:
 dataset:
   train:
     type: peprec
-    structure_dir: /datapool/data2/home/jiahan/Data/PepMerge_new/
-    dataset_dir: /datapool/data2/home/jiahan/ResProj/PepDiff/frame-flow/Data/Fixed Data
+    structure_dir: ./data_input/PepMerge_release/
+    dataset_dir: ./data_input/PepMerge_lmdb/Fixed Data/
     name: pep_pocket_train
     reset: False
   val:
     type: peprec
-    structure_dir: /datapool/data2/home/jiahan/Data/PepMerge_new/
-    dataset_dir: /datapool/data2/home/jiahan/ResProj/PepDiff/frame-flow/Data/Fixed Data
+    structure_dir: ./data_input/PepMerge_release/
+    dataset_dir: ./data_input/PepMerge_lmdb/Fixed Data/
     name: pep_pocket_test
     reset: False

@@ -25,11 +25,11 @@ from models_con.flow_model import FlowModel
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='./configs/angle/learn_angle.yaml')
+    parser.add_argument('--config', type=str, default='./configs/learn_angle.yaml')
     parser.add_argument('--logdir', type=str, default="./logs")
-    parser.add_argument('--debug', action='store_true', default=False)
+    parser.add_argument('--debug', action='store_true', default=True)
     parser.add_argument('--device', type=str, default='cuda:0')
-    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--name', type=str, default='pepflow')
@@ -76,10 +76,15 @@ if __name__ == '__main__':
     # train_dataset = get_dataset(config.dataset.train)
     # val_dataset = get_dataset(config.dataset.val)
     train_dataset = PepDataset(structure_dir = config.dataset.train.structure_dir, dataset_dir = config.dataset.train.dataset_dir,
-                                            name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
+                                            name = config.dataset.train.name, transform=None, reset=False)
     # val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
     #                                         name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
+    train_loader = DataLoader(train_dataset, 
+                              batch_size=config.train.batch_size, 
+                              shuffle=True, 
+                              collate_fn=PaddingCollate(), 
+                              num_workers=args.num_workers, 
+                              pin_memory=True)
     train_iterator = inf_iterator(train_loader)
     # val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Train %d | Val %d' % (len(train_dataset), len(train_dataset)))

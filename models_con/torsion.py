@@ -47,6 +47,7 @@ def get_psi_angle(pos14: torch.Tensor) -> torch.Tensor:
 
 def get_torsion_angle(pos14: torch.Tensor, aa: torch.LongTensor):
     torsion, torsion_mask = [], []
+    #for each residue
     for i in range(pos14.shape[0]):
         if aa[i] < constants.AA.UNK: # 0-19
             chi = get_chi_angles(aa[i].item(), pos14[i])

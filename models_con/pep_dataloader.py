@@ -200,12 +200,16 @@ class PepDataset(Dataset):
 if __name__ == '__main__':
     device = 'cuda:1'
     # config,cfg_name = load_config("./configs/learn/learn_all.yaml")
-    dataset = PepDataset(structure_dir = "./Datas/PepMerge_release/", dataset_dir = "/Datas/Fixed Data",
+    dataset = PepDataset(structure_dir = "./data_input/PepMerge_release/", dataset_dir = "./",
                                             name = 'pep_pocket_test', transform=None, reset=True)
     print(len(dataset))
     print(dataset[0])
     
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=4, collate_fn=PaddingCollate(eight=False))
+    dataloader = DataLoader(dataset, 
+                            batch_size=4, 
+                            shuffle=True, 
+                            num_workers=0, 
+                            collate_fn=PaddingCollate(eight=False))
 
     batch = next(iter(dataloader))
     print(batch['torsion_angle'].shape)
