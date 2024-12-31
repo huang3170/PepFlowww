@@ -8,6 +8,8 @@ from Bio import PDB
 from Bio.PDB import PDBExceptions
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
+import sys
+print(sys.path)
 
 from pepflow.modules.protein.parsers import parse_pdb
 from pepflow.modules.common.geometry import *

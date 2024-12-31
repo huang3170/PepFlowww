@@ -18,6 +18,7 @@ Utilities for calculating all atom representations.
 Code adapted from OpenFold.
 """
 
+import numpy as np
 import torch
 from openfold.data import data_transforms
 from openfold.np import residue_constants
@@ -158,6 +159,7 @@ def frames_to_atom14_pos(
         group_mask = torch.nn.functional.one_hot(
             group_mask,
             num_classes=DEFAULT_FRAMES.shape[-3],
+            
         )
         frame_atom_mask = ATOM_MASK.to(aatype.device)[aatype, ...].unsqueeze(-1)  # type: ignore [attr-defined]
         frame_null_pos = IDEALIZED_POS.to(aatype.device)[aatype, ...]  # type: ignore [attr-defined]

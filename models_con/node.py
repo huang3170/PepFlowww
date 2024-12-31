@@ -10,7 +10,7 @@ class NodeEmbedder(nn.Module):
 
     def __init__(self, feat_dim, max_num_atoms, max_aa_types=22):
         super().__init__()
-        self.max_num_atoms = max_num_atoms
+        self.max_num_atoms = max_num_atoms #15
         self.max_aa_types = max_aa_types
         self.feat_dim = feat_dim
         self.aatype_embed = nn.Embedding(self.max_aa_types, feat_dim)
@@ -55,6 +55,7 @@ class NodeEmbedder(nn.Module):
             pos_atoms[:, :, BBHeavyAtom.C], 
             pos_atoms[:, :, BBHeavyAtom.N]
         )
+        # centralized
         t = pos_atoms[:, :, BBHeavyAtom.CA]
         crd = global_to_local(R, t, pos_atoms)    # (N, L, A, 3)
         crd_mask = mask_atoms[:, :, :, None].expand_as(crd)

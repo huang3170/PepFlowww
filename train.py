@@ -26,9 +26,10 @@ from models_con.flow_model import FlowModel
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='./configs/learn_angle.yaml')
+    parser.add_argument('--config', type=str, default='./configs/learn_angle.yaml')
     parser.add_argument('--logdir', type=str, default="./logs")
     parser.add_argument('--debug', action='store_true', default=True)
-    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)

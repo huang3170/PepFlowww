@@ -17,12 +17,27 @@
 
 import collections
 import functools
-from typing import Mapping, List, Tuple
+from typing import Any, Callable, Mapping, List, Tuple
 from importlib import resources
 
 import numpy as np
-import tree
+def map_structure(fn: Callable, tree: Any) -> Any:
+    """
+    Apply a function recursively to each element of a nested data structure (tree).
+    
+    Args:
+        fn (Callable): A function to apply to each element of the tree.
+        tree (Any): A nested data structure (e.g., lists, tuples, dictionaries).
 
+    Returns:
+        Any: A new nested data structure with `fn` applied to each element.
+    """
+    if isinstance(tree, (list, tuple)):
+        return type(tree)(map_structure(fn, elem) for elem in tree)
+    elif isinstance(tree, dict):
+        return {k: map_structure(fn, v) for k, v in tree.items()}
+    else:
+        return fn(tree)
 # Internal import (35fd).
 
 
@@ -1079,7 +1094,7 @@ chi_atom_2_one_hot = chi_angle_atom(2)
 
 # An array like chi_angles_atoms but using indices rather than names.
 chi_angles_atom_indices = [chi_angles_atoms[restype_1to3[r]] for r in restypes]
-chi_angles_atom_indices = tree.map_structure(
+chi_angles_atom_indices = map_structure(
     lambda atom_name: atom_order[atom_name], chi_angles_atom_indices
 )
 chi_angles_atom_indices = np.array(
