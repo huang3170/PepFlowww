@@ -84,7 +84,8 @@ class GAEncoder(nn.Module):
         )[:, None, :].repeat(1, mask.shape[1], 1)
         return timestep_emb
 
-    def forward(self, t, rotmats_t, trans_t, angles_t, seqs_t, node_embed, edge_embed, generate_mask, res_mask):
+    def forward(self, input_xt, t):
+        rotmats_t, trans_t, angles_t, seqs_t, node_embed, edge_embed, generate_mask, res_mask = input_xt
         num_batch, num_res = seqs_t.shape
 
         # incorperate current seq and timesteps
