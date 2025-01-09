@@ -215,7 +215,7 @@ class FlowModel(nn.Module):
         norm_scale = 1 / (1 - torch.min(t[...,None], torch.tensor(self._interpolant_cfg.t_normalization_clip))) # yim etal.trick, 1/1-t
 
         # trans vf loss
-        trans_loss = torch.sum((pred_trans_1_c - trans_0_c) - (trans_1_c-trans_0_c))**2*gen_mask[...,None],dim=(-1,-2) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
+        trans_loss = torch.sum((pred_trans_1_c - trans_1_c)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
 
         # rots vf loss
