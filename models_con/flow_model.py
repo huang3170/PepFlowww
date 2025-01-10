@@ -67,7 +67,7 @@ class FlowModel(nn.Module):
         self.edge_embedder = EdgeEmbedder(feat_dim=cfg.encoder.edge_embed_size,
                                           max_num_atoms=max_num_heavyatoms)
         self.ga_encoder = GAEncoder(cfg.encoder.ipa)
-        self.weight_network = nn.Sequential(nn.Linear(1, 256),  # Input shape: (batch_size, 1)
+        self.weight_network = nn.Sequential(nn.Linear(1, 256),  # Input shape: (batch_size, AA length, 1)
             nn.Mish(),  # Mish activation
             nn.Linear(256, 1) )
 
@@ -119,6 +119,7 @@ class FlowModel(nn.Module):
         P_mean = -1 
         P_std = 1.4
         c = 0.1
+        r= 1.0
 
         num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask,angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
@@ -138,34 +139,32 @@ class FlowModel(nn.Module):
 
         with torch.no_grad():
             # generate t 
-            sigma = torch.randn((num_batch,1), device=batch['aa'].device)
+            sigma = torch.randn((num_batch,num_res), device=batch['aa'].device)
             sigma = (sigma * P_std + P_mean).exp()
             t = torch.arctan(sigma / sigma_data)
 
-            # t = torch.rand((num_batch,1), device=batch['aa'].device) 
-            # t = t*(1-2 * self._interpolant_cfg.min_t) + self._interpolant_cfg.min_t # avoid 0
             if self.sample_structure:
                 # corrupt trans
                 # initialize random position
                 trans_0 = torch.randn((num_batch,num_res,3), device=batch['aa'].device) * sigma_data # scale with sigma?
                 trans_0_c,_ = self.zero_center_part(trans_0,gen_mask,res_mask)
-                trans_t = torch.cos(t) * trans_1 + torch.sin(t) * trans_0_c
+                trans_t = torch.cos(t)[...,None] * trans_1_c + torch.sin(t)[...,None] * trans_0_c
                 trans_t_c = torch.where(batch['generate_mask'][...,None],trans_t,trans_1_c)
-                dtrans_t_c_dt = torch.cos(t)* trans_0_c - torch.sin(t) * trans_1_c
+                dtrans_t_c_dt = torch.cos(t)[...,None]* trans_0_c - torch.sin(t)[...,None] * trans_1_c
                 dtrans_t_c_dt = torch.where(batch['generate_mask'][...,None],dtrans_t_c_dt,trans_1_c)
 
                 # corrupt rotmats
                 rotmats_0 = uniform_so3(num_batch,num_res,device=batch['aa'].device) * sigma_data
-                rotmats_t = torch.cos(t) * rotmats_1 + torch.sin(t) * rotmats_0
+                rotmats_t = torch.cos(t)[...,None,None] * rotmats_1 + torch.sin(t)[...,None,None] * rotmats_0
                 rotmats_t = torch.where(batch['generate_mask'][...,None,None],rotmats_t,rotmats_1)
-                drotmats_t_dt = torch.cos(t) * rotmats_0 - torch.sin(t) * rotmats_1
+                drotmats_t_dt = torch.cos(t)[...,None,None] * rotmats_0 - torch.sin(t)[...,None,None] * rotmats_1
                 drotmats_t_dt = torch.where(batch['generate_mask'][...,None,None],drotmats_t_dt,rotmats_1)
 
                 # corrup angles
                 angles_0 = torus.tor_random_uniform(angles_1.shape, device=batch['aa'].device, dtype=angles_1.dtype) * sigma_data # (B,L,5)
-                angles_t = torch.cos(t) * angles_1 + torch.sin(t) * angles_0
+                angles_t = torch.cos(t)[...,None] * angles_1 + torch.sin(t)[...,None] * angles_0
                 angles_t = torch.where(batch['generate_mask'][...,None],angles_t,angles_1)
-                dangles_t_dt = torch.cos(t) * angles_0 - torch.sin(t) * angles_1
+                dangles_t_dt = torch.cos(t)[...,None] * angles_0 - torch.sin(t)[...,None] * angles_1
                 dangles_t_dt = torch.where(batch['generate_mask'][...,None],dangles_t_dt,angles_1)
             else:
                 trans_t_c = trans_1_c.detach().clone()
@@ -174,56 +173,78 @@ class FlowModel(nn.Module):
             if self.sample_sequence:
                 # corrupt seqs
                 seqs_0_simplex = self.k * torch.randn_like(seqs_1_simplex) # (B,L,K)
-                seqs_t_simplex = torch.cos(t) * seqs_1_simplex + torch.sin(t) * seqs_0_simplex # (B,L,K)
+                seqs_t_simplex = torch.cos(t)[...,None] * seqs_1_simplex + torch.sin(t)[...,None] * seqs_0_simplex # (B,L,K)
                 seqs_t_simplex = torch.where(batch['generate_mask'][...,None],seqs_t_simplex,seqs_1_simplex)
-                dseqs_t_simplex_dt = torch.cos(t) * seqs_0_simplex - torch.sin(t) * seqs_1_simplex # (B,L,K)
+                dseqs_t_simplex_dt = torch.cos(t)[...,None] * seqs_0_simplex - torch.sin(t)[...,None] * seqs_1_simplex # (B,L,K)
                 dseqs_t_simplex_dt = torch.where(batch['generate_mask'][...,None],dseqs_t_simplex_dt,seqs_1_simplex)
 
                 seqs_t_prob = F.softmax(seqs_t_simplex,dim=-1) # (B,L,K)
                 seqs_t = sample_from(seqs_t_prob) # (B,L)
                 seqs_t = torch.where(batch['generate_mask'],seqs_t,seqs_1)
+
+                dseqs_t_simplex_dt_prob = F.softmax(dseqs_t_simplex_dt,dim=-1) # (B,L,K)
+                dseqs_t_dt = sample_from(dseqs_t_simplex_dt_prob) # (B,L)
+                dseqs_t_dt = torch.where(batch['generate_mask'],dseqs_t_dt,seqs_1)
+
             else:
                 seqs_t = seqs_1.detach().clone()
                 seqs_t_simplex = seqs_1_simplex.detach().clone()
                 seqs_t_prob = seqs_1_prob.detach().clone()
 
-        xt = [rotmats_t, trans_t_c, angles_t, seqs_t, node_embed, edge_embed, gen_mask, res_mask]
-        dxtdt = [drotmats_t_dt, dtrans_t_c_dt, dangles_t_dt, dseqs_t_simplex_dt,edge_embed,gen_mask,res_mask]
-
-        def f_teacher(x, t):
-            return self.ga_encoder(xt, t)
+        xt = torch.cat((rotmats_t.reshape(num_batch, num_res, 9), trans_t_c, angles_t, seqs_t[...,None]), dim=-1)/sigma_data
+        dxtdt = torch.cat((drotmats_t_dt.reshape(num_batch, num_res, 9), dtrans_t_c_dt, dangles_t_dt, dseqs_t_dt[...,None]), dim=-1)
+        aux_param = [node_embed, edge_embed, gen_mask, res_mask]
         
-        primals = (xt/sigma_data , t)
+        primals = (xt, t)
         tangents = (
-            torch.cos(t)* torch.sin(t)*dxtdt
+            torch.cos(t)[...,None]* torch.sin(t)[...,None]*dxtdt,
+            torch.cos(t)* torch.sin(t)*sigma_data,
         )
 
-        (teachere_pred_rotmats_1, teachere_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob), cos_sin_dFdt = \
+        (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob), \
+        (cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob) = \
             torch.autograd.functional.jvp(
-                f_teacher, primals, tangents
+               lambda xt, t: self.ga_encoder(xt, t, aux_param), 
+               primals, 
+               tangents,
             )
-        teacher_output = teacher_output.detach()
-        cos_sin_dFdt = cos_sin_dFdt.detach()
+        
+        teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, \
+        cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob = \
+            map(torch.Tensor.detach, 
+            (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, 
+             cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob))
+        # teacher_pred_seqs_1 = sample_from(F.softmax(teacher_pred_seqs_1_prob,dim=-1))
+        # teacher_pred_seqs_1 = torch.where(batch['generate_mask'],teacher_pred_seqs_1,torch.clamp(seqs_1,0,19))
+        # cos_sin_dFdt_seqs = sample_from(F.softmax(cos_sin_dFdt_seqs_prob,dim=-1))
+        # cos_sin_dFdt_seqs = torch.where(batch['generate_mask'],cos_sin_dFdt_seqs,torch.clamp(seqs_1,0,19))
 
         # denoise
-        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(xt, t)
+        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(xt, t, aux_param)
         pred_seqs_1 = sample_from(F.softmax(pred_seqs_1_prob,dim=-1))
         pred_seqs_1 = torch.where(batch['generate_mask'],pred_seqs_1,torch.clamp(seqs_1,0,19))
         pred_trans_1_c,_ = self.zero_center_part(pred_trans_1,gen_mask,res_mask)
         pred_trans_1_c = pred_trans_1 # implicitly enforce zero center in gen_mask, in this way, we dont need to move receptor when sampling
 
-        norm_scale = 1 / (1 - torch.min(t[...,None], torch.tensor(self._interpolant_cfg.t_normalization_clip))) # yim etal.trick, 1/1-t
-
+        w = self.weight_network(t[..., None])
         # trans vf loss
-        trans_loss = torch.sum((pred_trans_1_c - trans_1_c)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
-        trans_loss = torch.mean(trans_loss)
+        trans_g = (-(torch.cos(t)[..., None] ** 2) * (sigma_data * teacher_pred_trans_1 - dtrans_t_c_dt)
+            - r * torch.cos(t)[..., None] * torch.sin(t)[..., None] * (trans_t_c + sigma_data * cos_sin_dFdt_trans))
+        trans_g = trans_g / (torch.norm(trans_g, dim=-1, keepdim=True) + c)
+        trans_D = trans_1_c.shape[-1]
+        trans_loss = torch.mean((torch.exp(w) / trans_D) * torch.mean(torch.reshape(
+            (pred_trans_1 - teacher_pred_trans_1 - trans_g) ** 2,
+            (teacher_pred_trans_1.shape[0], -1)), axis=-1) - w)
 
         # rots vf loss
-        gt_rot_vf = so3_utils.calc_rot_vf(rotmats_t, rotmats_1)
-        pred_rot_vf = so3_utils.calc_rot_vf(rotmats_t, pred_rotmats_1)
-        rot_loss = torch.sum(((gt_rot_vf - pred_rot_vf) * norm_scale)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
-        rot_loss = torch.mean(rot_loss)
-
+        rot_g = (-(torch.cos(t)[..., None,None] ** 2) * (sigma_data * teacher_pred_rotmats_1 - drotmats_t_dt)
+            - r * torch.cos(t)[..., None, None] * torch.sin(t)[..., None, None] * (rotmats_t + sigma_data * cos_sin_dFdt_rotmats))
+        rot_g = rot_g / (torch.norm(rot_g, dim=-1, keepdim=True) + c)
+        rot_D = rotmats_1.shape[-1]
+        rot_loss = torch.mean((torch.exp(w) / rot_D) * torch.mean(torch.reshape(
+            (pred_rotmats_1 - teacher_pred_rotmats_1 - rot_g) ** 2,
+            (teacher_pred_rotmats_1.shape[0], -1)), axis=-1) - w)
+        
         # backbone aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_1_c, rotmats_1)[:, :, :3] 
         pred_bb_atoms = all_atom.to_atom37(pred_trans_1_c, pred_rotmats_1)[:, :, :3]
@@ -233,34 +254,35 @@ class FlowModel(nn.Module):
             dim=(-1, -2, -3)
         ) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         bb_atom_loss = torch.mean(bb_atom_loss)
-        # bb_atom_loss = torch.mean(torch.where(t[:,0]>=0.75,bb_atom_loss,torch.zeros_like(bb_atom_loss))) # penalty for near gt point
 
         # seqs vf loss
-        seqs_loss = F.cross_entropy(pred_seqs_1_prob.view(-1,pred_seqs_1_prob.shape[-1]),
-                                    torch.clamp(seqs_1,0,19).view(-1), reduction='none').view(pred_seqs_1_prob.shape[:-1]) # (N,L), not softmax
-        seqs_loss = torch.sum(seqs_loss * gen_mask, dim=-1) / (torch.sum(gen_mask,dim=-1) + 1e-8)
-        seqs_loss = torch.mean(seqs_loss)
-
+        seqs_g = (-(torch.cos(t)[...,None] ** 2) * (sigma_data * teacher_pred_seqs_1_prob - dseqs_t_dt)
+            - r * torch.cos(t)[...,None] * torch.sin(t)[...,None] * (seqs_t + sigma_data * cos_sin_dFdt_seqs_prob))
+        seqs_g = seqs_g / (torch.norm(seqs_g, dim=-1, keepdim=True) + c)
+        seqs_D = seqs_1.shape[-1]
+        seqs_loss = torch.mean((torch.exp(w) / seqs_D) * torch.mean(torch.reshape(
+            (pred_seqs_1_prob - teacher_pred_seqs_1_prob - seqs_g) ** 2,
+            (teacher_pred_seqs_1_prob.shape[0], -1)), axis=-1) - w)
+        
         # we should not use angle mask, as you dont know aa type when generating
-        # angle_mask_loss = torch.cat([angle_mask,angle_mask],dim=-1) # (B,L,10)
         # angle vf loss
         angle_mask_loss = torsions_mask.to(batch['aa'].device) #(22,5)
         angle_mask_loss = angle_mask_loss[pred_seqs_1.reshape(-1)].reshape(num_batch,num_res,-1) # (B,L,5)
         angle_mask_loss = torch.cat([angle_mask_loss,angle_mask_loss],dim=-1) # (B,L,10)
         angle_mask_loss = torch.logical_and(batch['generate_mask'][...,None].bool(),angle_mask_loss)
-        gt_angle_vf = torus.tor_logmap(angles_t, angles_1)
-        gt_angle_vf_vec = torch.cat([torch.sin(gt_angle_vf),torch.cos(gt_angle_vf)],dim=-1)
-        pred_angle_vf = torus.tor_logmap(angles_t, pred_angles_1)
-        pred_angle_vf_vec = torch.cat([torch.sin(pred_angle_vf),torch.cos(pred_angle_vf)],dim=-1)
-        # angle_loss = torch.sum(((gt_angle_vf_vec - pred_angle_vf_vec) * norm_scale)**2*gen_mask[...,None],dim=(-1,-2)) / ((torch.sum(gen_mask,dim=-1)) + 1e-8) # (B,)
-        angle_loss = torch.sum(((gt_angle_vf_vec - pred_angle_vf_vec) * norm_scale)**2*angle_mask_loss,dim=(-1,-2)) / (torch.sum(angle_mask_loss,dim=(-1,-2)) + 1e-8) # (B,)
-        angle_loss = torch.mean(angle_loss)
 
+        angle_g = (-(torch.cos(t)[...,None] ** 2) * (sigma_data * teacher_pred_angles_1 - dangles_t_dt)
+            - r * torch.cos(t)[...,None] * torch.sin(t)[...,None] * (angles_t + sigma_data * cos_sin_dFdt_angles))
+        angle_g = angle_g / (torch.norm(angle_g, dim=-1, keepdim=True) + c)
+        angle_D = angles_1.shape[-1]
+        angle_loss = torch.mean((torch.exp(w) / angle_D) * torch.mean(torch.reshape(
+            (pred_angles_1 - teacher_pred_angles_1 - angle_g) ** 2*angle_mask_loss,
+            (teacher_pred_angles_1.shape[0], -1)), axis=-1)
+            - w)
 
         # angle aux loss
         angles_1_vec = torch.cat([torch.sin(angles_1),torch.cos(angles_1)],dim=-1)
         pred_angles_1_vec = torch.cat([torch.sin(pred_angles_1),torch.cos(pred_angles_1)],dim=-1)
-        # torsion_loss = torch.sum((pred_angles_1_vec - angles_1_vec)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         torsion_loss = torch.sum((pred_angles_1_vec - angles_1_vec)**2*angle_mask_loss,dim=(-1,-2)) / (torch.sum(angle_mask_loss,dim=(-1,-2)) + 1e-8) # (B,)
         torsion_loss = torch.mean(torsion_loss)
 
