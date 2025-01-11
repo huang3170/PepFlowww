@@ -84,17 +84,12 @@ class GAEncoder(nn.Module):
         )[:, None, :].repeat(1, mask.shape[1], 1)
         return timestep_emb
 
-    def forward(self, input_xt, t, aux_param):
-        num_batch, num_res = input_xt.shape[:-1]
-        rotmats_t = input_xt[..., :9].reshape(num_batch, num_res, 3, 3)
-        trans_t  = input_xt[..., 9:12]
-        angles_t = input_xt[..., 12:17]
-        seqs_t = input_xt[..., 17:].squeeze(-1).to(torch.long)
+    def forward(self, rotmats_t, trans_t, angles_t,seqs_t, t, aux_param):
+        num_batch, num_res = trans_t.shape[:-1]
+        sigma_data, node_embed, edge_embed, generate_mask, res_mask = aux_param
 
-        seqs_t = torch.clamp(seqs_t, 0, self.current_seq_embedder.num_embeddings - 1)
-
-        node_embed, edge_embed, generate_mask, res_mask = aux_param
-
+        seqs_t = torch.clamp(seqs_t * sigma_data, 0, self.current_seq_embedder.num_embeddings - 1).long()
+        
         # incorperate current seq and timesteps
         node_mask = res_mask
         edge_mask = node_mask[:, None] * node_mask[:, :, None]

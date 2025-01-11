@@ -187,29 +187,30 @@ class FlowModel(nn.Module):
                 dseqs_t_dt = torch.where(batch['generate_mask'],dseqs_t_dt,seqs_1)
 
             else:
-                seqs_t = seqs_1.detach().clone()
-                seqs_t_simplex = seqs_1_simplex.detach().clone()
-                seqs_t_prob = seqs_1_prob.detach().clone()
+                seqs_t = seqs_1.clone()
+                seqs_t_simplex = seqs_1_simplex.clone()
+                seqs_t_prob = seqs_1_prob.clone()
+                dseqs_t_dt = torch.zeros_like(seqs_1)
 
-        xt = torch.cat((rotmats_t.reshape(num_batch, num_res, 9), trans_t_c, angles_t, seqs_t[...,None]), dim=-1)/sigma_data
-        dxtdt = torch.cat((drotmats_t_dt.reshape(num_batch, num_res, 9), dtrans_t_c_dt, dangles_t_dt, dseqs_t_dt[...,None]), dim=-1).to(batch['aa'].device)
-        aux_param = [node_embed, edge_embed, gen_mask, res_mask]
         
-        v_x = torch.cos(t)[...,None]* torch.sin(t)[...,None]*dxtdt
-        v_t = torch.cos(t)* torch.sin(t)*sigma_data
+        aux_param = (sigma_data, node_embed, edge_embed, gen_mask, res_mask)
+        
+        t_ = torch.cos(t)*torch.sin(t)/ sigma_data
+        v_t = torch.cos(t)* torch.sin(t)
 
-        def model_wrapper(input_x, t):
-            pred = self.ga_encoder(input_x, t, aux_param)
+        def model_wrapper(rotmats_t, trans_t_c, angles_t, seqs_t, t):
+            pred = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param=aux_param)
             return pred
         
         (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob), \
         (cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob) = \
             torch.func.jvp(
                model_wrapper, 
-               (xt, t), 
-               (v_x, v_t),
+               (rotmats_t/sigma_data, trans_t_c/sigma_data, angles_t/sigma_data, seqs_t/sigma_data, t), 
+               (t_[...,None,None]*drotmats_t_dt, t_[...,None]*dtrans_t_c_dt, t_[...,None]*dangles_t_dt, t_*dseqs_t_dt, v_t),
             )
-        
+        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param)
+
         teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, \
         cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob = \
             map(torch.Tensor.detach, 
@@ -221,7 +222,6 @@ class FlowModel(nn.Module):
         cos_sin_dFdt_seqs = torch.where(batch['generate_mask'],cos_sin_dFdt_seqs,torch.clamp(seqs_1,0,19))
 
         # denoise
-        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(xt, t, aux_param)
         pred_seqs_1 = sample_from(F.softmax(pred_seqs_1_prob,dim=-1))
         pred_seqs_1 = torch.where(batch['generate_mask'],pred_seqs_1,torch.clamp(seqs_1,0,19))
         pred_trans_1_c,_ = self.zero_center_part(pred_trans_1,gen_mask,res_mask)

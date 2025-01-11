@@ -195,7 +195,7 @@ def quat_to_rot(quat: torch.Tensor) -> torch.Tensor:
     quat = quat[..., None] * quat[..., None, :]
 
     # [4, 4, 3, 3]
-    mat = quat.new_tensor(_QTR_MAT, requires_grad=False)
+    mat = torch.tensor(_QTR_MAT, device=quat.device, dtype=quat.dtype)
 
     # [*, 4, 4, 3, 3]
     shaped_qtr_mat = mat.view((1,) * len(quat.shape[:-2]) + mat.shape)
@@ -253,7 +253,7 @@ _QUAT_MULTIPLY_BY_VEC = _QUAT_MULTIPLY[:, 1:, :]
 
 def quat_multiply(quat1, quat2):
     """Multiply a quaternion by another quaternion."""
-    mat = quat1.new_tensor(_QUAT_MULTIPLY)
+    mat = torch.tensor(_QUAT_MULTIPLY, device=quat1.device, dtype=quat1.dtype)
     reshaped_mat = mat.view((1,) * len(quat1.shape[:-1]) + mat.shape)
     return torch.sum(
         reshaped_mat *
@@ -265,7 +265,7 @@ def quat_multiply(quat1, quat2):
 
 def quat_multiply_by_vec(quat, vec):
     """Multiply a quaternion by a pure-vector quaternion."""
-    mat = quat.new_tensor(_QUAT_MULTIPLY_BY_VEC)
+    mat = torch.tensor(_QUAT_MULTIPLY_BY_VEC, device=quat.device, dtype=quat.dtype)
     reshaped_mat = mat.view((1,) * len(quat.shape[:-1]) + mat.shape)
     return torch.sum(
         reshaped_mat *
