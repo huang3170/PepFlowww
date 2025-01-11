@@ -202,6 +202,15 @@ class FlowModel(nn.Module):
             pred_rotmats1, pred_trans1, pred_angles1, pred_seqs1_prob = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param=aux_param)
             return pred_rotmats1, (pred_trans1, pred_angles1, pred_seqs1_prob)
         
+        epsilon = 0.1
+        t_plus = t + epsilon
+        t_minus = t - epsilon
+        rotmats_t_plus = model_wrapper_rotmats(rotmats_t, t_plus)
+        rotmats_t_minus = model_wrapper_rotmats(rotmats_t, t_minus)
+
+        approx_gradient = (rotmats_t_plus[0] - rotmats_t_minus[0]) / (2 * epsilon)
+        print(f"Approximated gradient: {approx_gradient}")
+        
         teacher_pred_rotmats_1, cos_sin_dFdt_rotmats, (pred_train1,pred_angles1,pred_seqs1 )= \
             torch.func.jvp(
                model_wrapper_rotmats, 
