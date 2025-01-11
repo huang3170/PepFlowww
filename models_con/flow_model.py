@@ -198,16 +198,16 @@ class FlowModel(nn.Module):
         t_ = torch.cos(t)*torch.sin(t)/ sigma_data
         v_t = torch.cos(t)* torch.sin(t)
 
-        def model_wrapper(rotmats_t, trans_t_c, angles_t, seqs_t, t):
-            pred = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param=aux_param)
-            return pred
+        def model_wrapper_rotmats(rotmats_t, t):
+            pred_rotmats1, pred_trans1, pred_angles1, pred_seqs1_prob = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param=aux_param)
+            return pred_rotmats1, (pred_trans1, pred_angles1, pred_seqs1_prob)
         
-        (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob), \
-        (cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob) = \
+        teacher_pred_rotmats_1, cos_sin_dFdt_rotmats, (pred_train1,pred_angles1,pred_seqs1 )= \
             torch.func.jvp(
-               model_wrapper, 
-               (rotmats_t/sigma_data, trans_t_c/sigma_data, angles_t/sigma_data, seqs_t/sigma_data, t), 
-               (t_[...,None,None]*drotmats_t_dt, t_[...,None]*dtrans_t_c_dt, t_[...,None]*dangles_t_dt, t_*dseqs_t_dt, v_t),
+               model_wrapper_rotmats, 
+               (rotmats_t/sigma_data, t), 
+               (t_[...,None,None]*drotmats_t_dt, v_t),
+               has_aux=True
             )
         pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param)
 
