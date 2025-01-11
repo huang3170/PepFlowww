@@ -115,11 +115,11 @@ class FlowModel(nn.Module):
     
     def forward(self, batch):
         
-        sigma_data = 0.5
-        P_mean = -1 
-        P_std = 1.4
-        c = 0.1
-        r= 1.0
+        sigma_data = torch.tensor(0.5, device=batch['aa'].device)
+        P_mean = torch.tensor(-1, device=batch['aa'].device)
+        P_std = torch.tensor(1.4, device=batch['aa'].device)
+        c = torch.tensor(0.1, device=batch['aa'].device)
+        r= torch.tensor(1.0, device=batch['aa'].device)
 
         num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask,angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
@@ -192,21 +192,22 @@ class FlowModel(nn.Module):
                 seqs_t_prob = seqs_1_prob.detach().clone()
 
         xt = torch.cat((rotmats_t.reshape(num_batch, num_res, 9), trans_t_c, angles_t, seqs_t[...,None]), dim=-1)/sigma_data
-        dxtdt = torch.cat((drotmats_t_dt.reshape(num_batch, num_res, 9), dtrans_t_c_dt, dangles_t_dt, dseqs_t_dt[...,None]), dim=-1)
+        dxtdt = torch.cat((drotmats_t_dt.reshape(num_batch, num_res, 9), dtrans_t_c_dt, dangles_t_dt, dseqs_t_dt[...,None]), dim=-1).to(batch['aa'].device)
         aux_param = [node_embed, edge_embed, gen_mask, res_mask]
         
-        primals = (xt, t)
-        tangents = (
-            torch.cos(t)[...,None]* torch.sin(t)[...,None]*dxtdt,
-            torch.cos(t)* torch.sin(t)*sigma_data,
-        )
+        v_x = torch.cos(t)[...,None]* torch.sin(t)[...,None]*dxtdt
+        v_t = torch.cos(t)* torch.sin(t)*sigma_data
 
+        def model_wrapper(input_x, t):
+            pred = self.ga_encoder(input_x, t, aux_param)
+            return pred
+        
         (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob), \
         (cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob) = \
-            torch.autograd.functional.jvp(
-               lambda xt, t: self.ga_encoder(xt, t, aux_param), 
-               primals, 
-               tangents,
+            torch.func.jvp(
+               model_wrapper, 
+               (xt, t), 
+               (v_x, v_t),
             )
         
         teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, \
@@ -214,10 +215,10 @@ class FlowModel(nn.Module):
             map(torch.Tensor.detach, 
             (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, 
              cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob))
-        # teacher_pred_seqs_1 = sample_from(F.softmax(teacher_pred_seqs_1_prob,dim=-1))
-        # teacher_pred_seqs_1 = torch.where(batch['generate_mask'],teacher_pred_seqs_1,torch.clamp(seqs_1,0,19))
-        # cos_sin_dFdt_seqs = sample_from(F.softmax(cos_sin_dFdt_seqs_prob,dim=-1))
-        # cos_sin_dFdt_seqs = torch.where(batch['generate_mask'],cos_sin_dFdt_seqs,torch.clamp(seqs_1,0,19))
+        teacher_pred_seqs_1 = sample_from(F.softmax(teacher_pred_seqs_1_prob,dim=-1))
+        teacher_pred_seqs_1 = torch.where(batch['generate_mask'],teacher_pred_seqs_1,torch.clamp(seqs_1,0,19))
+        cos_sin_dFdt_seqs = sample_from(F.softmax(cos_sin_dFdt_seqs_prob,dim=-1))
+        cos_sin_dFdt_seqs = torch.where(batch['generate_mask'],cos_sin_dFdt_seqs,torch.clamp(seqs_1,0,19))
 
         # denoise
         pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(xt, t, aux_param)
@@ -256,13 +257,13 @@ class FlowModel(nn.Module):
         bb_atom_loss = torch.mean(bb_atom_loss)
 
         # seqs vf loss
-        seqs_g = (-(torch.cos(t)[...,None] ** 2) * (sigma_data * teacher_pred_seqs_1_prob - dseqs_t_dt)
-            - r * torch.cos(t)[...,None] * torch.sin(t)[...,None] * (seqs_t + sigma_data * cos_sin_dFdt_seqs_prob))
+        seqs_g = (-(torch.cos(t) ** 2) * (sigma_data * teacher_pred_seqs_1 - dseqs_t_dt)
+            - r * torch.cos(t) * torch.sin(t)* (seqs_t + sigma_data * cos_sin_dFdt_seqs))
         seqs_g = seqs_g / (torch.norm(seqs_g, dim=-1, keepdim=True) + c)
         seqs_D = seqs_1.shape[-1]
         seqs_loss = torch.mean((torch.exp(w) / seqs_D) * torch.mean(torch.reshape(
-            (pred_seqs_1_prob - teacher_pred_seqs_1_prob - seqs_g) ** 2,
-            (teacher_pred_seqs_1_prob.shape[0], -1)), axis=-1) - w)
+            (pred_seqs_1- teacher_pred_seqs_1 - seqs_g) ** 2,
+            (teacher_pred_seqs_1.shape[0], -1)), axis=-1) - w)
         
         # we should not use angle mask, as you dont know aa type when generating
         # angle vf loss
