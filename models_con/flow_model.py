@@ -198,27 +198,58 @@ class FlowModel(nn.Module):
         t_ = torch.cos(t)*torch.sin(t)/ sigma_data
         v_t = torch.cos(t)* torch.sin(t)
 
-        def model_wrapper_rotmats(rotmats_t, t):
-            pred_rotmats1, pred_trans1, pred_angles1, pred_seqs1_prob = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param=aux_param)
-            return pred_rotmats1, (pred_trans1, pred_angles1, pred_seqs1_prob)
-        
-        epsilon = 0.1
-        t_plus = t + epsilon
-        t_minus = t - epsilon
-        rotmats_t_plus = model_wrapper_rotmats(rotmats_t, t_plus)
-        rotmats_t_minus = model_wrapper_rotmats(rotmats_t, t_minus)
+        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param)
 
-        approx_gradient = (rotmats_t_plus[0] - rotmats_t_minus[0]) / (2 * epsilon)
-        print(f"Approximated gradient: {approx_gradient}")
+        def model_wrapper_rotmats(rotmats_t, t):
+            pred_rotmats1, _, _, _ = self.ga_encoder(rotmats_t=rotmats_t, 
+                                                    trans_t=trans_t_c, 
+                                                    angles_t=angles_t,
+                                                    seqs_t=seqs_t, 
+                                                    t=t, 
+                                                    aux_param=aux_param)
+            return pred_rotmats1
         
-        teacher_pred_rotmats_1, cos_sin_dFdt_rotmats, (pred_train1,pred_angles1,pred_seqs1 )= \
+        teacher_pred_rotmats_1, cos_sin_dFdt_rotmats = \
             torch.func.jvp(
                model_wrapper_rotmats, 
                (rotmats_t/sigma_data, t), 
                (t_[...,None,None]*drotmats_t_dt, v_t),
-               has_aux=True
             )
-        pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob  = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param)
+        
+        def model_wrapper_angle(angles_t, t):
+            _, _, pred_angles1, _ = self.ga_encoder(rotmats_t=rotmats_t, 
+                                                    trans_t=trans_t_c, 
+                                                    angles_t=angles_t,
+                                                    seqs_t=seqs_t, 
+                                                    t=t, 
+                                                    aux_param=aux_param)
+            return pred_angles1
+        
+        teacher_pred_angles_1, cos_sin_dFdt_angles = \
+            torch.func.jvp(
+               model_wrapper_angle, 
+               (angles_t/sigma_data, t), 
+               (t_[...,None]*dangles_t_dt, v_t),
+            )
+        
+        def model_wrapper_seq(seqs_t, t):
+            _, _, _, pred_seqs1_prob = self.ga_encoder(rotmats_t=rotmats_t, 
+                                                    trans_t=trans_t_c, 
+                                                    angles_t=angles_t,
+                                                    seqs_t=seqs_t, 
+                                                    t=t, 
+                                                    aux_param=aux_param)
+            return pred_seqs1_prob
+        
+        teacher_pred_seqs_1, cos_sin_dFdt_seqs = \
+            torch.func.jvp(
+               model_wrapper_seq, 
+               (seqs_t/sigma_data, t), 
+               (t_*dseqs_t_dt, v_t),
+            )
+
+ 
+
 
         teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, \
         cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob = \

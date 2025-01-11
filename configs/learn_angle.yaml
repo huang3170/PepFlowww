@@ -6,9 +6,9 @@ model:
       c_s: 32 #${model.node_embed_size}
       c_z: 16 #${model.edge_embed_size}
       c_hidden: 32
-      no_heads: 8
-      no_qk_points: 8
-      no_v_points: 12
+      no_heads: 2
+      no_qk_points: 2
+      no_v_points: 2
       seq_tfmr_num_heads: 4
       seq_tfmr_num_layers: 2
       num_blocks: 2
