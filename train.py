@@ -54,20 +54,20 @@ if __name__ == '__main__':
         writer = BlackHole()
     else:
         run = wandb.init(project=args.name, config=config, name='%s[%s]' % (config_name, args.tag))
-        if args.resume:
-            log_dir = os.path.dirname(os.path.dirname(args.resume))
-        else:
-            log_dir = get_new_log_dir(args.logdir, prefix='%s[%s]' % (config_name, version_short), tag=args.tag)
-        with open(os.path.join(log_dir, 'commit.txt'), 'w') as f:
-            f.write(branch + '\n')
-            f.write(version + '\n')
-        ckpt_dir = os.path.join(log_dir, 'checkpoints')
-        if not os.path.exists(ckpt_dir): os.makedirs(ckpt_dir)
-        logger = get_logger('train', log_dir)
-        # writer = torch.utils.tensorboard.SummaryWriter(log_dir)
-        # tensorboard_trace_handler = torch.profiler.tensorboard_trace_handler(log_dir)
-        if not os.path.exists(os.path.join(log_dir, os.path.basename(args.config))):
-            shutil.copyfile(args.config, os.path.join(log_dir, os.path.basename(args.config)))
+    if args.resume:
+        log_dir = os.path.dirname(os.path.dirname(args.resume))
+    else:
+        log_dir = get_new_log_dir(args.logdir, prefix='%s[%s]' % (config_name, version_short), tag=args.tag)
+    with open(os.path.join(log_dir, 'commit.txt'), 'w') as f:
+        f.write(branch + '\n')
+        f.write(version + '\n')
+    ckpt_dir = os.path.join(log_dir, 'checkpoints')
+    if not os.path.exists(ckpt_dir): os.makedirs(ckpt_dir)
+    logger = get_logger('train', log_dir)
+    # writer = torch.utils.tensorboard.SummaryWriter(log_dir)
+    # tensorboard_trace_handler = torch.profiler.tensorboard_trace_handler(log_dir)
+    if not os.path.exists(os.path.join(log_dir, os.path.basename(args.config))):
+        shutil.copyfile(args.config, os.path.join(log_dir, os.path.basename(args.config)))
     logger.info(args)
     logger.info(config)
 
@@ -122,7 +122,7 @@ if __name__ == '__main__':
 
         # Forward pass
         # loss_dict, metric_dict = model.get_loss(batch) # get loss and metrics
-        loss_dict = model(batch) # get loss and metrics
+        loss_dict = model(batch, it) # get loss and metrics
         loss = sum_weighted_losses(loss_dict, config.train.loss_weights)
         # loss = loss / config.train.accum_grad
         time_forward_end = current_milli_time()

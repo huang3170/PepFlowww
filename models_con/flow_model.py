@@ -113,14 +113,13 @@ class FlowModel(nn.Module):
     def seq_to_simplex(self,seqs):
         return clampped_one_hot(seqs, self.K).float() * self.k * 2 - self.k # (B,L,K)
     
-    def forward(self, batch):
+    def forward(self, batch,step):
         
         sigma_data = torch.tensor(0.5, device=batch['aa'].device)
         P_mean = torch.tensor(-1, device=batch['aa'].device)
         P_std = torch.tensor(1.4, device=batch['aa'].device)
         c = torch.tensor(0.1, device=batch['aa'].device)
-        r= torch.tensor(1.0, device=batch['aa'].device)
-
+        r = min(1.0, step / 10000)
         num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask,angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
 
@@ -264,9 +263,6 @@ class FlowModel(nn.Module):
                (t_*dseqs_t_dt, v_t),
             )
 
- 
-
-
         teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, \
         cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob = \
             map(torch.Tensor.detach, 
@@ -284,23 +280,24 @@ class FlowModel(nn.Module):
         pred_trans_1_c = pred_trans_1 # implicitly enforce zero center in gen_mask, in this way, we dont need to move receptor when sampling
 
         w = self.weight_network(t[..., None])
-        # trans vf loss
+        # trans loss
         trans_g = (-(torch.cos(t)[..., None] ** 2) * (sigma_data * teacher_pred_trans_1 - dtrans_t_c_dt)
             - r * torch.cos(t)[..., None] * torch.sin(t)[..., None] * (trans_t_c + sigma_data * cos_sin_dFdt_trans))
         trans_g = trans_g / (torch.norm(trans_g, dim=-1, keepdim=True) + c)
         trans_D = trans_1_c.shape[-1]
         trans_loss = torch.mean((torch.exp(w) / trans_D) * torch.mean(torch.reshape(
-            (pred_trans_1 - teacher_pred_trans_1 - trans_g) ** 2,
-            (teacher_pred_trans_1.shape[0], -1)), axis=-1) - w)
+            (pred_trans_1 - teacher_pred_trans_1 - trans_g) ** 2*gen_mask[...,None],
+            (teacher_pred_trans_1.shape[0], -1)), axis=-1) + w)
 
+       
         # rots vf loss
         rot_g = (-(torch.cos(t)[..., None,None] ** 2) * (sigma_data * teacher_pred_rotmats_1 - drotmats_t_dt)
             - r * torch.cos(t)[..., None, None] * torch.sin(t)[..., None, None] * (rotmats_t + sigma_data * cos_sin_dFdt_rotmats))
         rot_g = rot_g / (torch.norm(rot_g, dim=-1, keepdim=True) + c)
         rot_D = rotmats_1.shape[-1]
         rot_loss = torch.mean((torch.exp(w) / rot_D) * torch.mean(torch.reshape(
-            (pred_rotmats_1 - teacher_pred_rotmats_1 - rot_g) ** 2,
-            (teacher_pred_rotmats_1.shape[0], -1)), axis=-1) - w)
+            (pred_rotmats_1 - teacher_pred_rotmats_1 - rot_g) ** 2*gen_mask[...,None,None],
+            (teacher_pred_rotmats_1.shape[0], -1)), axis=-1) + w)
         
         # backbone aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_1_c, rotmats_1)[:, :, :3] 
@@ -318,14 +315,13 @@ class FlowModel(nn.Module):
         seqs_g = seqs_g / (torch.norm(seqs_g, dim=-1, keepdim=True) + c)
         seqs_D = seqs_1.shape[-1]
         seqs_loss = torch.mean((torch.exp(w) / seqs_D) * torch.mean(torch.reshape(
-            (pred_seqs_1- teacher_pred_seqs_1 - seqs_g) ** 2,
-            (teacher_pred_seqs_1.shape[0], -1)), axis=-1) - w)
+            (pred_seqs_1- teacher_pred_seqs_1 - seqs_g) ** 2*gen_mask,
+            (teacher_pred_seqs_1.shape[0], -1)), axis=-1) + w)
         
         # we should not use angle mask, as you dont know aa type when generating
         # angle vf loss
         angle_mask_loss = torsions_mask.to(batch['aa'].device) #(22,5)
         angle_mask_loss = angle_mask_loss[pred_seqs_1.reshape(-1)].reshape(num_batch,num_res,-1) # (B,L,5)
-        angle_mask_loss = torch.cat([angle_mask_loss,angle_mask_loss],dim=-1) # (B,L,10)
         angle_mask_loss = torch.logical_and(batch['generate_mask'][...,None].bool(),angle_mask_loss)
 
         angle_g = (-(torch.cos(t)[...,None] ** 2) * (sigma_data * teacher_pred_angles_1 - dangles_t_dt)
@@ -334,12 +330,13 @@ class FlowModel(nn.Module):
         angle_D = angles_1.shape[-1]
         angle_loss = torch.mean((torch.exp(w) / angle_D) * torch.mean(torch.reshape(
             (pred_angles_1 - teacher_pred_angles_1 - angle_g) ** 2*angle_mask_loss,
-            (teacher_pred_angles_1.shape[0], -1)), axis=-1)
-            - w)
+            (teacher_pred_angles_1.shape[0], -1)), axis=-1) + w)
 
         # angle aux loss
         angles_1_vec = torch.cat([torch.sin(angles_1),torch.cos(angles_1)],dim=-1)
         pred_angles_1_vec = torch.cat([torch.sin(pred_angles_1),torch.cos(pred_angles_1)],dim=-1)
+        angle_mask_loss = torch.cat([angle_mask_loss,angle_mask_loss],dim=-1) # (B,L,10)
+
         torsion_loss = torch.sum((pred_angles_1_vec - angles_1_vec)**2*angle_mask_loss,dim=(-1,-2)) / (torch.sum(angle_mask_loss,dim=(-1,-2)) + 1e-8) # (B,)
         torsion_loss = torch.mean(torsion_loss)
 
