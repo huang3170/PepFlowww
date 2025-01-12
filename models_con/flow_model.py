@@ -216,6 +216,22 @@ class FlowModel(nn.Module):
                (t_[...,None,None]*drotmats_t_dt, v_t),
             )
         
+        def model_wrapper_trains(trans_t_c, t):
+            _, pred_trans1, _, _ = self.ga_encoder(rotmats_t=rotmats_t, 
+                                                    trans_t=trans_t_c, 
+                                                    angles_t=angles_t,
+                                                    seqs_t=seqs_t, 
+                                                    t=t, 
+                                                    aux_param=aux_param)
+            return pred_trans1
+        
+        teacher_pred_trans_1, cos_sin_dFdt_trans = \
+            torch.func.jvp(
+               model_wrapper_trains, 
+               (trans_t_c/sigma_data, t), 
+               (t_[...,None]*dtrans_t_c_dt, v_t),
+            )
+        
         def model_wrapper_angle(angles_t, t):
             _, _, pred_angles1, _ = self.ga_encoder(rotmats_t=rotmats_t, 
                                                     trans_t=trans_t_c, 
@@ -241,7 +257,7 @@ class FlowModel(nn.Module):
                                                     aux_param=aux_param)
             return pred_seqs1_prob
         
-        teacher_pred_seqs_1, cos_sin_dFdt_seqs = \
+        teacher_pred_seqs_1_prob, cos_sin_dFdt_seqs_prob = \
             torch.func.jvp(
                model_wrapper_seq, 
                (seqs_t/sigma_data, t), 
