@@ -75,6 +75,10 @@ class GAEncoder(nn.Module):
                     edge_embed_in=edge_in,
                     edge_embed_out=self._ipa_conf.c_z,
                 )
+
+        self.logvar_linear = nn.Sequential(nn.Linear(1, 256),  # Input shape: (batch_size, 1)
+            nn.Mish(),  # Mish activation
+            nn.Linear(256, 1) )
     
     def embed_t(self, timesteps, mask):
         timestep_emb = get_time_embedding(
@@ -130,4 +134,6 @@ class GAEncoder(nn.Module):
         pred_angles1 = self.angle_net(node_embed)
         pred_angles1 = pred_angles1 % (2*math.pi) # inductive bias to bound between (0,2pi)
 
-        return pred_rotmats1, pred_trans1, pred_angles1, pred_seqs1_prob
+        logvar = self.logvar_linear(t)
+
+        return pred_rotmats1, pred_trans1, pred_angles1, pred_seqs1_prob, logvar
