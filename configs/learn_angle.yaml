@@ -1,17 +1,17 @@
 model:
   encoder:
-    node_embed_size: 32
-    edge_embed_size: 16
+    node_embed_size: 128
+    edge_embed_size: 64
     ipa:
-      c_s: 32 #${model.node_embed_size}
-      c_z: 16 #${model.edge_embed_size}
-      c_hidden: 32
-      no_heads: 2
-      no_qk_points: 2
-      no_v_points: 2
+      c_s: 128 #${model.node_embed_size}
+      c_z: 64 #${model.edge_embed_size}
+      c_hidden: 128
+      no_heads: 8
+      no_qk_points: 8
+      no_v_points: 12
       seq_tfmr_num_heads: 4
       seq_tfmr_num_layers: 2
-      num_blocks: 2
+      num_blocks: 6
       stop_grad: False
   interpolant:
     min_t: 1.e-2
@@ -43,7 +43,7 @@ train:
     torsion_loss: 0.5
   max_iters: 400000000
   val_freq: 20000
-  batch_size: 32
+  batch_size: 4
   accum_grad: 1
   seed: 114514
   max_grad_norm: 100.0

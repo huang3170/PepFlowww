@@ -150,9 +150,9 @@ class FlowModel(nn.Module):
                 dtrans_t_c_dt = torch.where(batch['generate_mask'][...,None],dtrans_t_c_dt,trans_1_c)
 
                 # # corrupt rotmats
-                rotmats_0 = torch.randn((num_batch,num_res,3,3), device=batch['aa'].device) #uniform_so3(num_batch,num_res,device=batch['aa'].device) #* sigma_data
+                rotmats_0 = uniform_so3(num_batch,num_res,device=batch['aa'].device) #* sigma_data
                 rotmats_t = torch.cos(t)[...,None,None] * rotmats_1 + torch.sin(t)[...,None,None] * rotmats_0
-                rotmats_t = torch.where(batch['generate_mask'][...,None,None],rotmats_t,rotmats_1)
+                rotmats_t = torch.where(batch['generate_mask'][...,None,None],rotmats_t,rotmats_1) 
                 drotmats_t_dt = torch.cos(t)[...,None,None] * rotmats_0 - torch.sin(t)[...,None,None] * rotmats_1
                 drotmats_t_dt = torch.where(batch['generate_mask'][...,None,None],drotmats_t_dt,rotmats_1)
 
@@ -165,7 +165,7 @@ class FlowModel(nn.Module):
             else:
                 trans_t_c = trans_1_c.detach().clone()
                 angles_t = angles_1.detach().clone()
-            rotmats_t = rotmats_1.detach().clone()
+                rotmats_t = rotmats_1.detach().clone()
             if self.sample_sequence:
                 # corrupt seqs
                 seqs_0_simplex = self.k * torch.randn_like(seqs_1_simplex) # (B,L,K)
@@ -194,80 +194,31 @@ class FlowModel(nn.Module):
         v_x = torch.cos(t)*torch.sin(t)/ sigma_data
         v_t = torch.cos(t)* torch.sin(t)
 
-        def model_wrapper_rotmats(rotmats_t, t):
-            pred_rotmats1, _, _, _, logvar_rotmat = self.ga_encoder(rotmats_t=rotmats_t, 
+        def model_wrapper_rotmats(trans_t_c,angles_t,seqs_t, t):
+            _,pred_trans1,pred_angles1,pred_seqs1_prob, logvar = self.ga_encoder(rotmats_t=rotmats_t, 
                                                     trans_t=trans_t_c, 
                                                     angles_t=angles_t,
                                                     seqs_t=seqs_t, 
                                                     t=t, 
                                                     aux_param=aux_param)
-            return pred_rotmats1, logvar_rotmat
+            return (pred_trans1,pred_angles1, pred_seqs1_prob), logvar
         
-        teacher_pred_rotmats_1, cos_sin_dFdt_rotmats, logvar_rotmat = \
+        (teacher_pred_trans_1,teacher_pred_angles_1, teacher_pred_seqs_1_prob),\
+        (cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob), logvar = \
             torch.func.jvp(
                model_wrapper_rotmats, 
-               (rotmats_t/sigma_data, t), 
-               (v_x[...,None,None]*drotmats_t_dt, v_t),
+               (trans_t_c/sigma_data, angles_t/sigma_data, seqs_t/sigma_data, t), 
+               (v_x[...,None]*dtrans_t_c_dt, v_x[...,None]*dangles_t_dt, v_x*dseqs_t_dt, v_t),
                has_aux=True
             )
-        
-        def model_wrapper_trains(trans_t_c, t):
-            _, pred_trans1, _, _, logvar_trans = self.ga_encoder(rotmats_t=rotmats_t, 
-                                                    trans_t=trans_t_c, 
-                                                    angles_t=angles_t,
-                                                    seqs_t=seqs_t, 
-                                                    t=t, 
-                                                    aux_param=aux_param)
-            return pred_trans1, logvar_trans
-        
-        teacher_pred_trans_1, cos_sin_dFdt_trans, logvar_trans = \
-            torch.func.jvp(
-               model_wrapper_trains, 
-               (trans_t_c/sigma_data, t), 
-               (v_x[...,None]*dtrans_t_c_dt, v_t),
-               has_aux=True
-            )
-        
-        def model_wrapper_angle(angles_t, t):
-            _, _, pred_angles1, _, logvar_angle = self.ga_encoder(rotmats_t=rotmats_t, 
-                                                    trans_t=trans_t_c, 
-                                                    angles_t=angles_t,
-                                                    seqs_t=seqs_t, 
-                                                    t=t, 
-                                                    aux_param=aux_param)
-            return pred_angles1, logvar_angle
-        
-        teacher_pred_angles_1, cos_sin_dFdt_angles, logvar_angle = \
-            torch.func.jvp(
-               model_wrapper_angle, 
-               (angles_t/sigma_data, t), 
-               (v_x[...,None]*dangles_t_dt, v_t),
-               has_aux=True
-            )
-        
-        def model_wrapper_seq(seqs_t, t):
-            _, _, _, pred_seqs1_prob, logvar_seq = self.ga_encoder(rotmats_t=rotmats_t, 
-                                                    trans_t=trans_t_c, 
-                                                    angles_t=angles_t,
-                                                    seqs_t=seqs_t, 
-                                                    t=t, 
-                                                    aux_param=aux_param)
-            return pred_seqs1_prob, logvar_seq
-        
-        teacher_pred_seqs_1_prob, cos_sin_dFdt_seqs_prob, logvar_seq = \
-            torch.func.jvp(
-               model_wrapper_seq, 
-               (seqs_t/sigma_data, t), 
-               (v_x*dseqs_t_dt, v_t),
-               has_aux=True
-            )
+    
         pred_rotmats_1, pred_trans_1, pred_angles_1, pred_seqs_1_prob,_  = self.ga_encoder(rotmats_t, trans_t_c, angles_t, seqs_t, t, aux_param)
 
-        teacher_pred_rotmats_munis, teacher_pred_trans_minus, teacher_pred_angles_minus, teacher_pred_seqs_prob_munis, \
-        cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob = \
+        teacher_pred_trans_minus, teacher_pred_angles_minus, teacher_pred_seqs_prob_munis, \
+        cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob = \
             map(torch.Tensor.detach, 
-            (teacher_pred_rotmats_1, teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, 
-             cos_sin_dFdt_rotmats, cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob))
+            (teacher_pred_trans_1, teacher_pred_angles_1, teacher_pred_seqs_1_prob, 
+             cos_sin_dFdt_trans, cos_sin_dFdt_angles, cos_sin_dFdt_seqs_prob))
         teacher_pred_seqs_1 = sample_from(F.softmax(teacher_pred_seqs_1_prob,dim=-1))
         teacher_pred_seqs_1 = torch.where(batch['generate_mask'],teacher_pred_seqs_1,torch.clamp(seqs_1,0,19))
         teacher_pred_seqs_munis = sample_from(F.softmax(teacher_pred_seqs_prob_munis,dim=-1))
@@ -284,19 +235,22 @@ class FlowModel(nn.Module):
 
         # trans loss
         trans_g = (-(torch.cos(t)[..., None] ** 2) * (sigma_data * teacher_pred_trans_1 - dtrans_t_c_dt)
-            - r * torch.cos(t)[..., None] * torch.sin(t)[..., None] * (trans_t_c + sigma_data * cos_sin_dFdt_trans))
-        trans_g = trans_g / (torch.norm(trans_g, dim=-1, keepdim=True) + c)
+            - r * (torch.cos(t)[..., None] * torch.sin(t)[..., None] * trans_t_c + sigma_data * cos_sin_dFdt_trans))
+        
+        trans_g_norm = torch.linalg.vector_norm(trans_g, dim=(1, 2), keepdim=True)
+        trans_g_norm = trans_g_norm * np.sqrt(trans_g_norm.numel() / trans_g.numel())
+        trans_g = trans_g / (trans_g_norm + c)
         weight = 1 / sigma
-        trans_loss =(weight / torch.exp(logvar_trans))[...,None] * torch.square(teacher_pred_trans_1 - teacher_pred_trans_minus - trans_g).mean(dim=[1,2]) + logvar_trans
+        trans_loss =(weight / torch.exp(logvar))[...,None] * torch.square(teacher_pred_trans_1 - teacher_pred_trans_minus - trans_g).mean(dim=[1,2]) + logvar
         trans_loss = trans_loss.mean()
 
        
         # # rots vf loss
-        rot_g = (-(torch.cos(t)[..., None,None] ** 2) * (sigma_data * teacher_pred_rotmats_1 - drotmats_t_dt)
-            - r * torch.cos(t)[..., None, None] * torch.sin(t)[..., None, None] * (rotmats_t + sigma_data * cos_sin_dFdt_rotmats))
-        rot_g = rot_g / (torch.norm(rot_g, dim=-1, keepdim=True) + c)
-        rot_loss =(weight / torch.exp(logvar_rotmat))[...,None] * torch.square(teacher_pred_rotmats_1 - teacher_pred_rotmats_munis - rot_g).mean(dim=[1,2]) + logvar_rotmat
-        rot_loss = rot_loss.mean()
+        # rot_g = (-(torch.cos(t)[..., None,None] ** 2) * (sigma_data * teacher_pred_rotmats_1 - drotmats_t_dt)
+        #     - r * torch.cos(t)[..., None, None] * torch.sin(t)[..., None, None] * (rotmats_t + sigma_data * cos_sin_dFdt_rotmats))
+        # rot_g = rot_g / (torch.norm(rot_g, dim=-1, keepdim=True) + c)
+        # rot_loss =(weight / torch.exp(logvar_rotmat))[...,None] * torch.square(teacher_pred_rotmats_1 - teacher_pred_rotmats_munis - rot_g).mean(dim=[1,2]) + logvar_rotmat
+        # rot_loss = rot_loss.mean()
         
         # backbone aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_1_c, rotmats_1)[:, :, :3] 
@@ -311,8 +265,11 @@ class FlowModel(nn.Module):
         # seqs vf loss
         seqs_g = (-(torch.cos(t) ** 2) * (sigma_data * teacher_pred_seqs_1 - dseqs_t_dt)
             - r * torch.cos(t) * torch.sin(t)* (seqs_t + sigma_data * cos_sin_dFdt_seqs))
-        seqs_g = seqs_g / (torch.norm(seqs_g, dim=-1, keepdim=True) + c)
-        seqs_loss =(weight / torch.exp(logvar_seq))[...,None] * torch.square(teacher_pred_seqs_1 - teacher_pred_seqs_munis - seqs_g)+ logvar_seq
+        seqs_g_norm = torch.linalg.vector_norm(seqs_g, dim=1, keepdim=True)
+        seqs_g_norm = seqs_g_norm * np.sqrt(seqs_g_norm.numel() / seqs_g.numel())
+        seqs_g = seqs_g / (seqs_g_norm + c)
+
+        seqs_loss =(weight / torch.exp(logvar))[...,None] * torch.square(teacher_pred_seqs_1 - teacher_pred_seqs_munis - seqs_g)+ logvar
         seqs_loss = seqs_loss.mean()
     
         
@@ -324,8 +281,11 @@ class FlowModel(nn.Module):
 
         angle_g = (-(torch.cos(t)[...,None] ** 2) * (sigma_data * teacher_pred_angles_1 - dangles_t_dt)
             - r * torch.cos(t)[...,None] * torch.sin(t)[...,None] * (angles_t + sigma_data * cos_sin_dFdt_angles))
-        angle_g = angle_g / (torch.norm(angle_g, dim=-1, keepdim=True) + c)
-        angle_loss =(weight / torch.exp(logvar_angle))[...,None] * torch.square(teacher_pred_angles_1 - teacher_pred_angles_minus - angle_g).mean(dim=[1,2]) + logvar_angle
+        angle_g_norm = torch.linalg.vector_norm(angle_g, dim=(1,2), keepdim=True)
+        angle_g_norm = angle_g_norm * np.sqrt(angle_g_norm.numel() / angle_g.numel())
+        angle_g = angle_g / (angle_g_norm + c)
+
+        angle_loss =(weight / torch.exp(logvar))[...,None] * torch.square(teacher_pred_angles_1 - teacher_pred_angles_minus - angle_g).mean(dim=[1,2]) + logvar
         angle_loss = angle_loss.mean()
         
 
@@ -339,7 +299,7 @@ class FlowModel(nn.Module):
 
         return {
             "trans_loss": trans_loss,
-            'rot_loss': rot_loss,
+            # 'rot_loss': rot_loss,
             'bb_atom_loss': bb_atom_loss,
             'seqs_loss': seqs_loss,
             'angle_loss': angle_loss,

@@ -1,5 +1,3 @@
-import wandb
-
 import os
 import shutil
 import argparse
@@ -52,8 +50,7 @@ if __name__ == '__main__':
     if args.debug:
         logger = get_logger('train', None)
         writer = BlackHole()
-    else:
-        run = wandb.init(project=args.name, config=config, name='%s[%s]' % (config_name, args.tag))
+   
     if args.resume:
         log_dir = os.path.dirname(os.path.dirname(args.resume))
     else:
